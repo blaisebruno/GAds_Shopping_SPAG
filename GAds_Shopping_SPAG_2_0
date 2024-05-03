@@ -1,0 +1,132 @@
+/**
+* Google Ads Shopping SPAG Campaign Script
+*
+* Copyright 2023. All Rights Reserved.
+* Custom Requests? contact@blaisebruno.com
+*
+* Author: Collectif Blaise & Bruno
+*
+* Version: 2.0
+* Last Updated: 20-11-2023
+*
+* Automatically creates single product ad groups for Google Shopping campaigns
+* based on data from a Google Sheet. Each ad group targets a specific product ID
+* and excludes other IDs.
+* It is designed to be run one time to helps the campaigns creation.
+*
+* ABOUT THE SCRIPT
+* This script reads product IDs, ad group names, campaign names, and bid amounts
+* from a Google Sheet and creates corresponding ad groups and product groups
+* within specified Google Shopping campaigns. It ensures that each product group
+* targets only the specified product ID and excludes others, aligning
+* with the structure and requirements of Google Shopping campaigns.
+*
+* INSTRUCTIONS FOR USE
+* - Set up a Google Shopping campaign in Google Ads, with : name, budget, priority, target location, and one first ad group.
+* - Ensure your Google Sheet contains columns for Product ID, Ad Group Name, Campaign Name, and Bid Amount, you can make a copy if this sheet : https://docs.google.com/spreadsheets/d/1M1G1ChIVmg7BLn5TBAlk0FXais62gTI7MV4amywBafs/copy
+* - Replace 'YOUR_SPREADSHEET_URL' in the script with the URL of your Google Sheet.
+* - Test the script in a controlled environment before deploying it in a live account.
+*
+* DISCLAIMER
+* This script is intended for internal use only and must not be sold,
+* traded, or used for any commercial purposes, including monetized trade
+* or social media promotion campaigns (such as LinkedIn "like and share" activities).
+* This script is provided "as is" and any express or implied warranties,
+* including but not limited to the implied warranties of merchantability and
+* fitness for a particular purpose, are disclaimed. In no event shall the
+* author or copyright holders be liable for any claim, damages, or other
+* liability arising from the use of the script.
+*
+*////////////////////////////////////////////////////////////////////
+
+function main() {
+  var spreadsheetUrl = 'YOUR_SPREADSHEET_URL'; // Replace with your Google Sheet URL
+  var sheet = SpreadsheetApp.openByUrl(spreadsheetUrl).getActiveSheet();
+  var data = sheet.getDataRange().getValues();
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var productId = row[0].toString(); // Convert product ID to string
+    var adGroupName = row[1];
+    var campaignName = row[2];
+    var bidAmount = formatBidAmount(row[3]);
+
+    Logger.log('Processing - Product ID: ' + productId + ', Ad Group: ' + adGroupName + ', Campaign: ' + campaignName + ', Bid: ' + bidAmount);
+
+    var adGroup = createAdGroup(campaignName, adGroupName, bidAmount);
+    if (adGroup) {
+      createProductGroup(adGroup, productId, bidAmount);
+      createShoppingAd(adGroup); // Create a Shopping ad in the ad group
+    } else {
+      Logger.log('Ad Group not created for Product ID: ' + productId);
+    }
+  }
+}
+
+function formatBidAmount(bid) {
+  if (typeof bid === 'string') {
+    bid = bid.replace(',', '.');
+  }
+  return parseFloat(bid);
+}
+
+function createAdGroup(campaignName, adGroupName, bidAmount) {
+  var campaignIterator = AdsApp.shoppingCampaigns()
+      .withCondition('CampaignName = "' + campaignName + '"')
+      .get();
+
+  if (!campaignIterator.hasNext()) {
+    Logger.log('Campaign not found: ' + campaignName);
+    return null;
+  }
+
+  var campaign = campaignIterator.next();
+  var adGroupOperation = campaign.newAdGroupBuilder()
+      .withName(adGroupName)
+      .build();
+
+  var adGroup = adGroupOperation.getResult();
+  if (adGroup && bidAmount) {
+    adGroup.bidding().setCpc(bidAmount);
+  }
+
+  return adGroup;
+}
+
+function createProductGroup(adGroup, productId, bidAmount) {
+  if (!adGroup.rootProductGroup()) {
+    adGroup.createRootProductGroup();
+  }
+  var rootProductGroup = adGroup.rootProductGroup();
+
+  var productGroupOperation = rootProductGroup.newChild()
+    .itemIdBuilder()
+    .withValue(productId)
+    .withBid(bidAmount)
+    .build();
+
+  var productGroup = productGroupOperation.getResult();
+  if (!productGroup) {
+    Logger.log('Failed to create product group for Product ID: ' + productId);
+    return;
+  }
+
+  var children = rootProductGroup.children().get();
+  while (children.hasNext()) {
+    var child = children.next();
+    if (child.isOtherCase()) {
+      child.exclude();
+    }
+  }
+}
+
+function createShoppingAd(adGroup) {
+  var adOperation = adGroup.newAdBuilder().build();
+
+  var ad = adOperation.getResult();
+  if (ad) {
+    Logger.log('Shopping ad created in Ad Group: ' + adGroup.getName());
+  } else {
+    Logger.log('Failed to create Shopping ad in Ad Group: ' + adGroup.getName());
+  }
+}
